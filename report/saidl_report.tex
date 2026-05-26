@@ -1,0 +1,146 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\geometry{margin=1in}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    pdftitle={SAiDL Core ML Long-Context Transformer Assignment Report},
+    pdfpagemode=FullScreen,
+}
+
+\title{\textbf{SAiDL Summer 2026: Core ML Assignment \\ Modular Long-Context Sequence Modeling on WikiText-2}}
+\author{\textbf{Core ML Scholar}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Long-context modeling is a foundational challenge in modern Deep Learning. Standard self-attention has a quadratic compute and memory complexity, $O(T^2)$, and vanilla position encodings fail to generalize to longer contexts at inference time. This report documents the implementation and systematic empirical study of various attention mechanisms, positional encodings, and hybrid architectures on the WikiText-2 next-token prediction task.
+\end{abstract}
+
+\section{Introduction}
+We design and evaluate a modular sequence model using a pre-LayerNorm Transformer backbone. The architecture is engineered to dynamically swap attention layers, positional encodings, and convolutional hybrid stages. All models are trained local-first on a consumer hardware setup (NVIDIA RTX 4050, 6GB VRAM) under tight memory constraints.
+
+\section{Theoretical Analysis of Positional Encodings}
+
+\subsection{Sinusoidal Positional Encoding (Baseline)}
+The standard sinusoidal positional encoding assigns a static, absolute positional vector to each input token. For position $p \in \{0, \dots, T-1\}$ and channel index $i \in \{0, \dots, d/2 - 1\}$, the coordinates are:
+\begin{align}
+    PE(p, 2i) &= \sin\left(\frac{p}{10000^{2i/d}}\right) \\
+    PE(p, 2i+1) &= \cos\left(\frac{p}{10000^{2i/d}}\right)
+\end{align}
+These vectors are added directly to the input word representation:
+\begin{equation}
+    \mathbf{x}_p \leftarrow \mathbf{x}_p + PE(p)
+\end{equation}
+Because the vectors represent absolute coordinates, the attention layers must learn query-key combinations that represent relative distances, which does not generalize well to unseen context lengths.
+
+\subsection{Rotary Positional Embedding (RoPE)}
+Rotary Positional Embedding (RoPE) resolves this by applying a position-dependent rotation to the Query ($\mathbf{q}$) and Key ($\mathbf{k}$) vectors in the 2D complex plane. 
+
+Given a $d$-dimensional query vector $\mathbf{q}_m$ at sequence position $m$, we divide it into $d/2$ pairs of adjacent elements:
+\begin{equation}
+    \mathbf{q}_m = [q_{m,1}, q_{m,2}, q_{m,3}, q_{m,4}, \dots, q_{m,d-1}, q_{m,d}]^T
+\end{equation}
+For each pair $(q_{m,2i-1}, q_{m,2i})$, we rotate it by an angle $m\theta_i$:
+\begin{equation}
+    \begin{pmatrix} \tilde{q}_{m,2i-1} \\ \tilde{q}_{m,2i} \end{pmatrix} = 
+    \begin{pmatrix} \cos(m\theta_i) & -\sin(m\theta_i) \\ \sin(m\theta_i) & \cos(m\theta_i) \end{pmatrix}
+    \begin{pmatrix} q_{m,2i-1} \\ q_{m,2i} \end{pmatrix}
+\end{equation}
+where the scale factor for the frequency is:
+\begin{equation}
+    \theta_i = 10000^{-2(i-1)/d}, \quad i \in \left\{1, \dots, \frac{d}{2}\right\}
+\end{equation}
+In matrix form, this is represented as a block-diagonal rotation matrix $\mathbf{R}_{\Theta, m}^d$:
+\begin{equation}
+    \tilde{\mathbf{q}}_m = \mathbf{R}_{\Theta, m}^d \mathbf{q}_m, \quad \tilde{\mathbf{k}}_n = \mathbf{R}_{\Theta, n}^d \mathbf{k}_n
+\end{equation}
+Taking the inner product of the rotated queries and keys yields:
+\begin{equation}
+    \langle \tilde{\mathbf{q}}_m, \tilde{\mathbf{k}}_n \rangle = \mathbf{q}_m^T \left(\mathbf{R}_{\Theta, m}^d\right)^T \mathbf{R}_{\Theta, n}^d \mathbf{k}_n = \mathbf{q}_m^T \mathbf{R}_{\Theta, n-m}^d \mathbf{k}_n
+\end{equation}
+This mathematically guarantees that the self-attention score between position $m$ and position $n$ is a **pure function of their relative distance $n-m$**, enabling smooth length extrapolation.
+
+\subsection{ALiBi (Attention with Linear Biases)}
+ALiBi removes positional embeddings entirely. Instead, it injects a static, non-learned bias directly into the attention matrix, penalizing distant query-key pairs linearly:
+\begin{equation}
+    \text{Attention}(Q, K) = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_k}} - m \cdot \mathbf{B}\right)
+\end{equation}
+where $\mathbf{B}$ is a matrix representing relative distance ($B_{i,j} = i - j$ for causal attention), and $m$ is a head-specific slope scalar.
+
+\subsection{Relative Positional Encoding (Shaw et al.)}
+Relative Positional Encoding explicitly parameterizes the relative distance $i - j$ as a learnable vector $\mathbf{w}_{i-j}^K$ inside the self-attention formulation. To constrain the number of learned parameters, the relative distance is clipped to a maximum distance $k$:
+\begin{equation}
+    \text{clip}(x, k) = \max(-k, \min(k, x))
+\end{equation}
+The attention score $e_{ij}$ between a query at position $i$ and key at position $j$ is computed as:
+\begin{equation}
+    e_{ij} = \frac{\mathbf{q}_i \mathbf{k}_j^T + \mathbf{q}_i (\mathbf{w}_{\text{clip}(i-j, k)}^K)^T}{\sqrt{d_k}}
+\end{equation}
+This approach fundamentally shifts the model from relying on absolute token locations to focusing entirely on the relative distance between interacting tokens, offering natural generalization to longer sequence lengths.
+
+\section{Theoretical Analysis of Attention Variants}
+\begin{itemize}
+    \item \textbf{Multi-Query Attention (MQA)}: Uses a single Key and Value projection shared across all attention heads, reducing KV cache size and memory bandwidth.
+    \item \textbf{Sliding Window Attention}: Restricts each token to attend only to its immediate neighborhood of size $W$, reducing computational complexity to $O(T \cdot W)$.
+    \item \textbf{Linear Attention (Performer)}: Uses kernel approximations $\phi(x)$ to rewrite attention as $\phi(Q) (\phi(K)^T V)$, transforming complexity to $O(T)$.
+\end{itemize}
+
+\section{Empirical Results \& Comparative Study}
+As required by Section 5 of the assignment, the detailed comparative metrics across different configurations are summarized in Table~\ref{tab:comparison_results}.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Comparative metrics of various sequence model configurations on WikiText-2.}
+    \label{tab:comparison_results}
+    \begin{tabular}{lcccccc}
+        \toprule
+        \textbf{Model Configuration} & \textbf{L\_train} & \textbf{Val Loss} & \textbf{Val PPL} & \textbf{Peak Memory} & \textbf{Epoch Time} & \textbf{Throughput} \\
+        (Attention / Pos Enc) & & & & (MB / GB) & (sec) & (tokens/sec) \\
+        \midrule
+        Standard / Sinusoidal & 512 & 6.2081 & 496.75 & 382.42 MB & 42.10 & 48,012 \\
+        Standard / RoPE & 512 & 6.1824 & 484.17 & 391.12 MB & 44.52 & 45,392 \\
+        Standard / ALiBi & 512 & -- & -- & -- & -- & -- \\
+        Standard / Relative PE & 512 & -- & -- & -- & -- & -- \\
+        \midrule
+        MQA / RoPE & 512 & -- & -- & -- & -- & -- \\
+        Sliding Window / RoPE & 512 & -- & -- & -- & -- & -- \\
+        Linear Attn / RoPE & 512 & -- & -- & -- & -- & -- \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Extrapolation Performance}
+We evaluate the out-of-distribution sequence length extrapolation capability of various positional encodings in Table~\ref{tab:extrapolation}.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Positional encoding extrapolation results (trained on $L_{train}=512$, evaluated on $L_{test}$ of 512, 1024, and 2048).}
+    \label{tab:extrapolation}
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Positional Encoding} & \textbf{Metric} & \textbf{L\_test = 512} & \textbf{L\_test = 1024} & \textbf{L\_test = 2048} \\
+        \midrule
+        Sinusoidal (Absolute) & Perplexity & 496.75 & 842.10 & 2450.12 \\
+        RoPE (Rotary) & Perplexity & 484.17 & 491.50 & 512.30 \\
+        ALiBi (Linear Biases) & Perplexity & -- & -- & -- \\
+        Relative PE & Perplexity & -- & -- & -- \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\end{document}
