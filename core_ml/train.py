@@ -11,7 +11,7 @@ def calculate_perplexity(loss):
 
 def main():
     parser = argparse.ArgumentParser(description="Train SequenceModel on WikiText-2 with modular options.")
-    parser.add_argument("--attn_type", type=str, default="standard", help="Type of attention block")
+    parser.add_argument("--attn_type", type=str, default="standard", choices=["standard", "mqa", "sliding_window", "linear", "conv_before", "gated_conv_ffn"], help="Type of attention block")
     parser.add_argument("--pos_enc", type=str, default="sinusoidal", choices=["sinusoidal", "rope", "alibi", "relative"], help="Type of positional encoding")
     parser.add_argument("--context_length", type=int, default=512, help="Context length for training")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")

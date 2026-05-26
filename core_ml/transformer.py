@@ -1,7 +1,8 @@
 import math
 import torch
 import torch.nn as nn
-from attention import StandardAttention
+from attention import StandardAttention, MultiQueryAttention, SlidingWindowAttention, LinearAttention
+from conv_hybrid import ConvBeforeAttentionBlock, GatedConvFFNBlock
 from rope import RotaryPositionalEncoding
 from alibi import AlibiPositionalEncoding
 from relative_pe import RelativePositionalEncoding
@@ -46,6 +47,16 @@ class TransformerBlock(nn.Module):
         # Pass pos_enc to the attention mechanism
         if attn_type == "standard":
             self.attn = StandardAttention(embed_dim, num_heads, pos_enc=pos_enc)
+        elif attn_type == "mqa":
+            self.attn = MultiQueryAttention(embed_dim, num_heads, pos_enc=pos_enc)
+        elif attn_type == "sliding_window":
+            self.attn = SlidingWindowAttention(embed_dim, num_heads, pos_enc=pos_enc, window_size=64)
+        elif attn_type == "linear":
+            self.attn = LinearAttention(embed_dim, num_heads, pos_enc=pos_enc)
+        elif attn_type == "conv_before":
+            self.attn = ConvBeforeAttentionBlock(embed_dim, num_heads, kernel_size=7, pos_enc=pos_enc)
+        elif attn_type == "gated_conv_ffn":
+            self.attn = GatedConvFFNBlock(embed_dim, num_heads, kernel_size=31, pos_enc=pos_enc)
         else:
             raise NotImplementedError(f"Attention type {attn_type} not implemented yet.")
             
