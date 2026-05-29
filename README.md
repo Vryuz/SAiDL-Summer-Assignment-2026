@@ -10,7 +10,7 @@ The `core_ml/` directory implements a highly modular language modeling pipeline 
 
 ### Implemented Features
 1. **Attention Variants**:
-   - Standard Multi-Head Attention ($O(N^2)$)
+   - Standard Multi-Head Attention (O(N^2))
    - Multi-Query Attention (MQA) for KV-cache optimization
    - Sliding Window Attention for local context restriction
    - Linear (Causal) Attention ($O(N)$) using cumulative sums on $\text{elu}(x)+1$ features.
