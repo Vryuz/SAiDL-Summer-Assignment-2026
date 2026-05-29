@@ -8,6 +8,9 @@ from alibi import AlibiPositionalEncoding
 from relative_pe import RelativePositionalEncoding
 
 class SinusoidalPositionalEncoding(nn.Module):
+    """
+    Standard sinusoidal absolute positional encoding (Vaswani et al.).
+    """
     def __init__(self, embed_dim, max_len=8192):
         super().__init__()
         # Create a matrix of shape (max_len, embed_dim)
@@ -27,6 +30,9 @@ class SinusoidalPositionalEncoding(nn.Module):
         return x + self.pe[:, :T, :]
 
 class FeedForward(nn.Module):
+    """
+    Standard 2-layer MLP feed-forward network with GELU activation.
+    """
     def __init__(self, embed_dim, hidden_dim):
         super().__init__()
         self.net = nn.Sequential(
@@ -39,10 +45,15 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class TransformerBlock(nn.Module):
+    """
+    A single Transformer block supporting various attention mechanisms
+    and optional convolutional hybrid architectures.
+    """
     def __init__(self, embed_dim, num_heads, attn_type="standard", pos_enc="sinusoidal"):
         super().__init__()
         self.ln1 = nn.LayerNorm(embed_dim)
         self.ln2 = nn.LayerNorm(embed_dim)
+        self.attn_type = attn_type
         
         # Pass pos_enc to the attention mechanism
         if attn_type == "standard":
@@ -63,12 +74,22 @@ class TransformerBlock(nn.Module):
         self.ff = FeedForward(embed_dim, embed_dim * 4)
 
     def forward(self, x, mask=None, rel_embeddings=None):
-        # Pre-LN architecture (LayerNorm before attention/ffn)
-        x = x + self.attn(self.ln1(x), mask=mask, rel_embeddings=rel_embeddings)
-        x = x + self.ff(self.ln2(x))
-        return x
+        if self.attn_type in ["conv_before", "gated_conv_ffn"]:
+            # Hybrid blocks contain their own LayerNorms, residual connections, and FFNs
+            # We bypass the TransformerBlock's outer LN and FFN to avoid double processing.
+            return self.attn(x, mask=mask, rel_embeddings=rel_embeddings)
+        else:
+            # Standard pre-LN architecture
+            x = x + self.attn(self.ln1(x), mask=mask, rel_embeddings=rel_embeddings)
+            x = x + self.ff(self.ln2(x))
+            return x
 
 class SequenceModel(nn.Module):
+    """
+    Full sequence model architecture for language modeling.
+    Incorporates token embeddings, positional encodings, transformer blocks,
+    and a final LayerNorm + LM head.
+    """
     def __init__(self, vocab_size, embed_dim=256, num_heads=8, num_layers=4, attn_type="standard", pos_enc="sinusoidal"):
         super().__init__()
         self.token_emb = nn.Embedding(vocab_size, embed_dim)

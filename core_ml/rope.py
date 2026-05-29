@@ -19,9 +19,8 @@ class RotaryPositionalEncoding(nn.Module):
         self.embed_dim = embed_dim
 
     def forward(self, x):
-        # Conforms strictly to: x + encoding
-        # Since RoPE is applied inside attention, we add a zero tensor.
-        return x + torch.zeros_like(x)
+        # RoPE is applied during attention calculation, not on embeddings
+        return x
 
 def rotate_half(x):
     """

@@ -1,5 +1,10 @@
+"""
+Training script for long-context sequence modeling on WikiText-2.
+Supports various attention mechanisms, positional encodings, and hybrid architectures.
+"""
 import time
 import argparse
+import math
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
@@ -192,5 +197,4 @@ def main():
         wandb.finish()
 
 if __name__ == "__main__":
-    import math
     main()

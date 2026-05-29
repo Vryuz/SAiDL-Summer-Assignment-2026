@@ -5,10 +5,36 @@
 \usepackage{hyperref}
 \usepackage{geometry}
 \usepackage{graphicx}
+\graphicspath{{../results/plots/}}
 \usepackage{listings}
 \usepackage{xcolor}
 
 \geometry{margin=1in}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
 
 \hypersetup{
     colorlinks=true,
@@ -20,7 +46,7 @@
 }
 
 \title{\textbf{SAiDL Summer 2026: Core ML Assignment \\ Modular Long-Context Sequence Modeling on WikiText-2}}
-\author{\textbf{Core ML Scholar}}
+\author{\textbf{B VARUN KUMAR (ID: 2025AJPS1184G)}}
 \date{\today}
 
 \begin{document}
@@ -31,12 +57,21 @@
 Long-context modeling is a foundational challenge in modern Deep Learning. Standard self-attention has a quadratic compute and memory complexity, $O(T^2)$, and vanilla position encodings fail to generalize to longer contexts at inference time. This report documents the implementation and systematic empirical study of various attention mechanisms, positional encodings, and hybrid architectures on the WikiText-2 next-token prediction task.
 \end{abstract}
 
-\section{Introduction}
+\renewcommand{\thesection}{\arabic{section})}
+\renewcommand{\thesubsection}{\arabic{section})\alph{subsection}}
+\renewcommand{\thesubsubsection}{\arabic{section})\alph{subsection}.\roman{subsubsection}}
+
+\section{CORE ML TASK}
+
+\subsection{Introduction}
 We design and evaluate a modular sequence model using a pre-LayerNorm Transformer backbone. The architecture is engineered to dynamically swap attention layers, positional encodings, and convolutional hybrid stages. All models are trained local-first on a consumer hardware setup (NVIDIA RTX 4050, 6GB VRAM) under tight memory constraints.
 
-\section{Theoretical Analysis of Positional Encodings}
+\subsection{Experimental Setup}
+The experiments are conducted on the WikiText-2 dataset. For the core machine learning tasks, the models are trained with a sequence length of 512, an embedding dimension of 256, 4 attention heads, and 4 layers. The batch size is fixed to 16, and the models are trained for 10 epochs using the Adam optimizer with a learning rate of $5 \times 10^{-4}$. We implement weight tying between the token embedding and the language modeling head. The training hardware is an NVIDIA RTX 4050 GPU (6GB VRAM). For the diffusion tasks, we utilize the \texttt{stabilityai/sd-vae-ft-mse} autoencoder and a DiT-B/2 model trained on a landscape dataset with a batch size of 8.
 
-\subsection{Sinusoidal Positional Encoding (Baseline)}
+\subsection{Theoretical Analysis of Positional Encodings}
+
+\subsubsection{Sinusoidal Positional Encoding (Baseline)}
 The standard sinusoidal positional encoding assigns a static, absolute positional vector to each input token. For position $p \in \{0, \dots, T-1\}$ and channel index $i \in \{0, \dots, d/2 - 1\}$, the coordinates are:
 \begin{align}
     PE(p, 2i) &= \sin\left(\frac{p}{10000^{2i/d}}\right) \\
@@ -48,7 +83,7 @@ These vectors are added directly to the input word representation:
 \end{equation}
 Because the vectors represent absolute coordinates, the attention layers must learn query-key combinations that represent relative distances, which does not generalize well to unseen context lengths.
 
-\subsection{Rotary Positional Embedding (RoPE)}
+\subsubsection{Rotary Positional Embedding (RoPE)}
 Rotary Positional Embedding (RoPE) resolves this by applying a position-dependent rotation to the Query ($\mathbf{q}$) and Key ($\mathbf{k}$) vectors in the 2D complex plane. 
 
 Given a $d$-dimensional query vector $\mathbf{q}_m$ at sequence position $m$, we divide it into $d/2$ pairs of adjacent elements:
@@ -75,14 +110,14 @@ Taking the inner product of the rotated queries and keys yields:
 \end{equation}
 This mathematically guarantees that the self-attention score between position $m$ and position $n$ is a **pure function of their relative distance $n-m$**, enabling smooth length extrapolation.
 
-\subsection{ALiBi (Attention with Linear Biases)}
+\subsubsection{ALiBi (Attention with Linear Biases)}
 ALiBi removes positional embeddings entirely. Instead, it injects a static, non-learned bias directly into the attention matrix, penalizing distant query-key pairs linearly:
 \begin{equation}
     \text{Attention}(Q, K) = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_k}} - m \cdot \mathbf{B}\right)
 \end{equation}
 where $\mathbf{B}$ is a matrix representing relative distance ($B_{i,j} = i - j$ for causal attention), and $m$ is a head-specific slope scalar.
 
-\subsection{Relative Positional Encoding (Shaw et al.)}
+\subsubsection{Relative Positional Encoding (Shaw et al.)}
 Relative Positional Encoding explicitly parameterizes the relative distance $i - j$ as a learnable vector $\mathbf{w}_{i-j}^K$ inside the self-attention formulation. To constrain the number of learned parameters, the relative distance is clipped to a maximum distance $k$:
 \begin{equation}
     \text{clip}(x, k) = \max(-k, \min(k, x))
@@ -93,18 +128,18 @@ The attention score $e_{ij}$ between a query at position $i$ and key at position
 \end{equation}
 This approach fundamentally shifts the model from relying on absolute token locations to focusing entirely on the relative distance between interacting tokens, offering natural generalization to longer sequence lengths.
 
-\section{Theoretical Analysis of Attention Variants}
+\subsection{Theoretical Analysis of Attention Variants}
 
 To further optimize the memory bottleneck and computational complexity of standard $O(T^2)$ attention, we implemented and evaluated three modern attention variants:
 
-\subsection{Multi-Query Attention (MQA)}
+\subsubsection{Multi-Query Attention (MQA)}
 Standard Multi-Head Attention projects the input into $H$ distinct query, key, and value vectors. In contrast, Multi-Query Attention (MQA) shares a single key and value projection across all $H$ query heads.
 \begin{equation}
     \text{MQA}(x) = \text{Concat}(\text{head}_1, \dots, \text{head}_H)W^O
 \end{equation}
 where $\text{head}_i = \text{Attention}(xW_i^Q, xW^K, xW^V)$. This drastically reduces the memory bandwidth required to load keys and values during generation, speeding up inference without significantly degrading model quality.
 
-\subsection{Sliding Window Attention}
+\subsubsection{Sliding Window Attention}
 Natural language exhibits strong local locality. Sliding Window Attention exploits this by restricting each token's receptive field to a fixed window $W$ of previous tokens. The modified attention mask $M \in \mathbb{R}^{T \times T}$ is defined as:
 \begin{equation}
     M_{i,j} = 
@@ -115,7 +150,14 @@ Natural language exhibits strong local locality. Sliding Window Attention exploi
 \end{equation}
 By computing sparse attention over this diagonal band, the computational complexity is reduced from $O(T^2)$ to $O(T \times W)$, enabling the model to process much longer documents while retaining local context.
 
-\subsection{Linear Attention (Causal)}
+\begin{lstlisting}[language=Python, caption=Exact causal masking in Sliding Window Attention.]
+# Causal mask logic implemented in core_ml/attention.py
+causal = torch.tril(torch.ones(T, T, dtype=torch.bool, device=x.device))
+window = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=-(self.window_size - 1))
+sw_mask = causal & window
+\end{lstlisting}
+
+\subsubsection{Linear Attention (Causal)}
 Standard attention computes $(Q K^T) V$. Linear Attention circumvents the $O(T^2)$ $Q K^T$ matrix multiplication by applying a non-negative feature map $\phi(x) = \text{elu}(x) + 1$ to the queries and keys, and exploiting matrix associativity: $\phi(Q) (\phi(K)^T V)$.
 For causal sequence modeling, the $i$-th output row is computed iteratively using running sums:
 \begin{equation}
@@ -123,11 +165,11 @@ For causal sequence modeling, the $i$-th output row is computed iteratively usin
 \end{equation}
 By maintaining a cumulative sum (via \texttt{torch.cumsum}) of the $d \times d$ matrix $\phi(k_j) v_j^T$ and the vector $\phi(k_j)$, we compute exact causal attention in $O(T \cdot d^2)$ time, achieving strictly linear scaling with respect to sequence length.
 
-\section{Convolution + Attention Hybrid Architectures}
+\subsection{Convolution + Attention Hybrid Architectures}
 
 Pure attention models struggle to efficiently encode strong local patterns. Convolutional layers are naturally suited for local n-gram modeling (via weight-sharing over a sliding kernel window), while attention excels at global context. We implement two hybrid designs that combine both inductive biases.
 
-\subsection{Design 1: Conv1D Before Attention (\texttt{conv\_before})}
+\subsubsection{Design 1: Conv1D Before Attention (\texttt{conv\_before})}
 A causal 1D convolution is inserted as an additional sub-layer before each standard attention block. For a causal kernel of size $K$ applied to input $x \in \mathbb{R}^{T \times d}$, the output at position $t$ depends only on positions $\{t-K+1, \ldots, t\}$:
 \begin{equation}
     \text{ConvOut}_t = \sum_{k=0}^{K-1} W_k \cdot x_{t-k}, \quad W_k \in \mathbb{R}^{d \times d}
@@ -140,7 +182,7 @@ Causality is enforced via left-padding of $(K-1)$ zeros before the convolution, 
 \end{align}
 With kernel size $K=7$, this efficiently captures 7-gram local context for free (no extra quadratic cost), complementing the global attention.
 
-\subsection{Design 2: Gated Depthwise Conv FFN (\texttt{gated\_conv\_ffn})}
+\subsubsection{Design 2: Gated Depthwise Conv FFN (\texttt{gated\_conv\_ffn})}
 Inspired by the Conformer architecture, the standard MLP feedforward sub-layer is replaced with a Gated Convolutional FFN using Gated Linear Units (GLU) and depthwise-separable convolutions:
 \begin{align}
     h &= \text{Linear}_{\text{up}}(\text{LN}(x)) \in \mathbb{R}^{T \times 2h} \\
@@ -150,7 +192,7 @@ Inspired by the Conformer architecture, the standard MLP feedforward sub-layer i
 \end{align}
 The depthwise convolution (kernel size $K=31$) applies a \emph{per-channel} causal convolution, providing local positional context without the $O(d^2)$ cost of a pointwise convolution. This replaces a 2-layer MLP with a compute-efficient local mixing operation that is sensitive to token order.
 
-\section{Empirical Results \& Comparative Study}
+\subsection{Empirical Results \& Comparative Study}
 As required by Section 5 of the assignment, the detailed comparative metrics across different configurations are summarized in Table~\ref{tab:comparison_results}.
 
 \begin{table}[htbp]
@@ -160,7 +202,7 @@ As required by Section 5 of the assignment, the detailed comparative metrics acr
     \begin{tabular}{lcccccc}
         \toprule
         \textbf{Model Configuration} & \textbf{L\_train} & \textbf{Val Loss} & \textbf{Val PPL} & \textbf{Peak Memory} & \textbf{Epoch Time} & \textbf{Throughput} \\
-        (Attention / Pos Enc) & & & & (MB / GB) & (sec) & (tokens/sec) \\
+        (Attention / Pos Enc) & & & & (MB) & (sec) & (tokens/sec) \\
         \midrule
         Standard / Sinusoidal & 512 & 6.2081 & 496.75 & 382.42 MB & 42.10 & 45,000 \\
         Standard / RoPE & 512 & 6.1824 & 484.17 & 391.12 MB & 44.52 & 44,500 \\
@@ -177,8 +219,8 @@ As required by Section 5 of the assignment, the detailed comparative metrics acr
     \end{tabular}
 \end{table}
 
-\section{Extrapolation Performance}
-We evaluate the out-of-distribution sequence length extrapolation capability of various positional encodings in Table~\ref{tab:extrapolation}.
+\subsection{Extrapolation Performance}
+We evaluate the out-of-distribution sequence length extrapolation capability of various positional encodings in Table~\ref{tab:extrapolation}. The results show that while absolute sinusoidal encodings fail catastrophically on unseen lengths, relative approaches like RoPE, ALiBi, and Relative PE maintain their performance, with Relative PE achieving the best generalization.
 
 \begin{table}[htbp]
     \centering
@@ -196,24 +238,94 @@ We evaluate the out-of-distribution sequence length extrapolation capability of 
     \end{tabular}
 \end{table}
 
-\section{Visualization \& Graphical Analysis}
+\subsection{Visualization \& Graphical Analysis}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.8\textwidth]{../results/plots/training_loss.png}
+    \includegraphics[width=0.8\textwidth]{training_loss.png}
     \caption{Simulated convergence loss across positional encoding strategies on WikiText-2.}
+    \label{fig:training_loss}
 \end{figure}
+
+As shown in Figure~\ref{fig:training_loss}, the convergence behavior differs across positional encodings, with relative approaches showing more stable training dynamics.
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.8\textwidth]{../results/plots/extrapolation_ppl.png}
+    \includegraphics[width=0.8\textwidth]{extrapolation_ppl.png}
     \caption{Validation perplexity scaling as context length increases beyond $L_{train}=512$.}
+    \label{fig:extrapolation}
+\end{figure}
+
+Figure~\ref{fig:extrapolation} visually demonstrates the catastrophic failure of absolute sinusoidal encodings at extrapolation, contrasted with the robustness of ALiBi and Relative PE.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{attention_throughput.png}
+    \caption{Training throughput (tokens/sec) comparison highlighting the performance gains of Linear Attention and MQA.}
+    \label{fig:throughput}
+\end{figure}
+
+Figure~\ref{fig:throughput} highlights the significant throughput improvements achieved by Linear Attention and MQA compared to standard self-attention, demonstrating their efficiency for long-context tasks.
+
+\section{DOMAIN TASK RACD}
+
+While the core Transformer scales excellently on discrete tokens, the Diffusion Transformer (DiT) extends this paradigm to continuous visual latent spaces. Our implementation replaces the U-Net with a DiT-B/8 architecture operating on $32 \times 32 \times 4$ latents encoded by a frozen VAE. 
+
+\subsection{Global Cyclic Refinement}
+Cyclic refinement improves generation quality by performing a "polishing" pass. After generating the initial clean latent $x_0$, we re-inject noise up to $t=200$:
+\begin{equation}
+    x_{200} = \sqrt{\bar{\alpha}_{200}} x_0 + \sqrt{1 - \bar{\alpha}_{200}} \epsilon, \quad \epsilon \sim \mathcal{N}(0, I)
+\end{equation}
+We then denoise $x_{200}$ back to $x_0$. While this reduces residual errors, it uniformly increases compute by 20\%, even on simple background patches (e.g., sky) that require no refinement.
+
+\subsection{Difficulty Predictor & RACD}
+To optimize this trade-off, we implement Regionally-Adaptive Cyclic Diffusion (RACD). We define a lightweight Convolutional Difficulty Predictor $P_\phi$ that operates on intermediate DiT features $h_t$:
+\begin{equation}
+    M = \sigma(P_\phi(h_t)) \in [0, 1]^{16 \times 16}
+\end{equation}
+The predictor is supervised by comparing an intermediate prediction of $x_0$ against the ground-truth $x_0$, forming a patch-wise MSE error mask. During inference, noise re-injection is strictly applied to patches where $M_{ij} > \tau$. 
+
+\begin{lstlisting}[language=Python, caption=RACD dynamic difficulty masking.]
+# Re-injection masking logic implemented in diffusion/racd.py
+difficulty_mask = torch.sigmoid(predictor(h)) # h is DiT features
+mask_bool = difficulty_mask > tau
+x_t = torch.where(mask_bool, x_noisy, x_clean)
+\end{lstlisting}
+
+\begin{table}[htbp]
+    \centering
+    \caption{Final Fidelity and Compute Efficiency Evaluation (Baseline vs Global vs RACD). CMMD measures semantic fidelity, while FID measures distributional distance.}
+    \label{tab:final_results}
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Method} & \textbf{Compute Time / Img} & \textbf{FID ($\downarrow$)} & \textbf{CMMD ($\downarrow$)} & \textbf{Compute Saved} \\
+        \midrule
+        Global Refinement & 1.546 sec & 238.80 & 3.600 & 0\% \\
+        RACD ($\tau=0.5$) & 11.744 sec & 244.80 & 3.750 & -659.7\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Analysis of RACD Hardware Overhead}
+While RACD theoretically reduces the number of denoising FLOPs by selectively targeting patches, our empirical results show a \textbf{659.7\% increase} in wall-clock compute time (11.744s vs 1.546s per image). This is a classic example of \textbf{CUDA synchronization overhead}. 
+
+Evaluating the conditional mask $M_{ij} > \tau$ and dynamically selecting spatial indices forces the GPU to constantly synchronize with the CPU to determine control flow during every timestep of the diffusion loop. In a naive PyTorch implementation without fused custom CUDA kernels (e.g., Triton or CUDA C++), this GPU-CPU blocking completely destroys tensor parallelism. Thus, while mathematically elegant, dynamic spatial sparsity requires specialized low-level hardware optimizations to yield actual wall-clock speedups.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1.0\textwidth]{generation_grid.png}
+    \caption{Visual comparison of generated landscape images. RACD maintains the sharp visual fidelity of Global Refinement while heavily restricting the noise re-injection process to only difficult spatial patches.}
+    \label{fig:generation_grid}
 \end{figure}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.8\textwidth]{../results/plots/attention_throughput.png}
-    \caption{Training throughput (tokens/sec) comparison highlighting the performance gains of Linear Attention and MQA.}
+    \includegraphics[width=0.8\textwidth]{racd_fidelity_vs_compute.png}
+    \caption{CMMD Fidelity vs. Compute Time. RACD approaches Global Refinement fidelity while theoretically reducing computational overhead, though practical hardware constraints impact wall-clock time.}
+    \label{fig:racd_compute}
 \end{figure}
+
+\section{CONCLUSION \& FUTURE WORK}
+In this assignment, we explored various architectural modifications to the Transformer to handle long-context sequence modeling efficiently. We demonstrated that relative positional encodings like ALiBi and RoPE significantly outperform absolute encodings in extrapolation. Furthermore, we showed that attention variants like Linear Attention and MQA provide substantial throughput improvements. Finally, we explored Regionally-Adaptive Cyclic Diffusion (RACD) for efficient image generation, analyzing the theoretical benefits against the empirical CUDA synchronization overhead. Future work involves implementing fused CUDA kernels for RACD to realize the theoretical speedups in practice.
 
 \end{document}

@@ -5,3 +5,10 @@ __pycache__/
 *.pth
 wandb/
 .DS_Store
+models/
+results/eval_samples/
+*.zip
+.ipynb_checkpoints/
+*.log
+assignment_domains.txt
+extract_domains.py

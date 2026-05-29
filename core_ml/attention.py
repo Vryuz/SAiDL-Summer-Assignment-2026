@@ -4,6 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class StandardAttention(nn.Module):
+    """
+    Standard multi-head self-attention with support for relative positional
+    encodings, ALiBi masks, and standard additive masking.
+    """
     def __init__(self, embed_dim, num_heads, pos_enc="sinusoidal"):
         super().__init__()
         assert embed_dim % num_heads == 0, "Embedding dimension must be divisible by number of heads"
@@ -74,6 +78,10 @@ class StandardAttention(nn.Module):
         return self.o_proj(out)
 
 class MultiQueryAttention(nn.Module):
+    """
+    Multi-Query Attention (MQA). Shares a single Key and Value projection across 
+    all Query heads to reduce memory bandwidth during generation.
+    """
     def __init__(self, embed_dim, num_heads, pos_enc="sinusoidal"):
         super().__init__()
         assert embed_dim % num_heads == 0, "Embedding dimension must be divisible by number of heads"
@@ -142,6 +150,10 @@ class MultiQueryAttention(nn.Module):
         # 6. Final linear projection
         return self.o_proj(out)
 class SlidingWindowAttention(nn.Module):
+    """
+    Sliding Window Attention. Restricts the receptive field of each token to a 
+    fixed window of previous tokens, reducing computational complexity.
+    """
     def __init__(self, embed_dim, num_heads, pos_enc="sinusoidal", window_size=64):
         super().__init__()
         assert embed_dim % num_heads == 0
@@ -176,8 +188,13 @@ class SlidingWindowAttention(nn.Module):
         scores = scores / math.sqrt(self.head_dim)
         
         # Apply sliding window causal mask
-        sw_mask = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=-self.window_size + 1)
-        scores = scores.masked_fill(~sw_mask, float('-inf'))
+        causal = torch.tril(torch.ones(T, T, dtype=torch.bool, device=x.device))
+        window = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=-(self.window_size - 1))
+        sw_mask = causal & window
+        
+        sw_mask_float = torch.zeros(T, T, device=x.device)
+        sw_mask_float.masked_fill_(~sw_mask, float('-inf'))
+        scores = scores + sw_mask_float
         
         if mask is not None:
             if torch.is_floating_point(mask):
@@ -191,6 +208,10 @@ class SlidingWindowAttention(nn.Module):
         return self.o_proj(out)
 
 class LinearAttention(nn.Module):
+    """
+    Linear Attention. Uses a non-negative feature map to approximate standard 
+    attention with linear time and memory complexity.
+    """
     def __init__(self, embed_dim, num_heads, pos_enc="none"):
         super().__init__()
         assert embed_dim % num_heads == 0
