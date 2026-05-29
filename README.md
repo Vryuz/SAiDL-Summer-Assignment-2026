@@ -26,11 +26,7 @@ The `core_ml/` directory implements a highly modular language modeling pipeline 
    - Automated testing on sequences lengths $L \in \{512, 1024, 2048\}$ to measure OOD perplexity scaling.
 
 ### Running Core ML Locally
-```bash
-python core_ml/train.py --attn_type standard --pos_enc rope --context_length 512
-```
-*Supported `attn_type`: `standard`, `mqa`, `sliding_window`, `linear`, `conv_before`, `gated_conv_ffn`*  
-*Supported `pos_enc`: `sinusoidal`, `rope`, `alibi`, `relative`*
+
 
 ---
 
