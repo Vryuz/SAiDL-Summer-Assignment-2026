@@ -1,4 +1,4 @@
-# SAiDL Summer Assignment 2026: Modular Sequence Modeling & Diffusion
+# SAiDL Summer Assignment 2026:
 
 > **📄 Official Submission Report**: [Read the full PDF Report here](report/SAIDL_FINALREPORT_VARUN_2025AJPS1184G.pdf)
 
@@ -8,54 +8,8 @@ This repository contains the complete codebase and experimentation framework for
 
 The project is structured with a heavy emphasis on clean, modular, and mathematically rigorous implementations in PyTorch, avoiding high-level abstractions where low-level understanding is required by the assignment specs.
 
----
 
-## 🚀 Quick Start & Installation
-
-**Python version**: Requires Python 3.10+
-
-```bash
-# Clone the repository
-git clone https://github.com/vryuz/SAiDL-Summer-Assignment-2026.git
-cd SAiDL-Summer-Assignment-2026
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
----
-
-## 📂 Repository Structure
-
-```text
-.
-├── core_ml/                  # Compulsory Core ML Task (Transformers)
-│   ├── attention.py          # Implementations of Standard, MQA, Sliding Window, and Linear Attention
-│   ├── transformer.py        # Pre-LN Transformer sequence model orchestrator
-│   ├── rope.py               # Rotary Positional Embeddings
-│   ├── alibi.py              # Attention with Linear Biases
-│   ├── relative_pe.py        # Shaw's Relative Positional Embeddings
-│   ├── conv_hybrid.py        # Conv1D and Gated Depthwise Conv FFN Hybrids
-│   ├── dataset.py            # WikiText-2 Dataset loader
-│   └── train.py              # Training loop with wandb logging & extrapolation testing
-├── diffusion/                # Domain-Specific Task (Diffusion)
-│   ├── baseline.py           # Baseline DiT-B/8 training loop
-│   ├── dataset.py            # Kaggle landscape dataset pipeline & VAE encoding
-│   ├── predictor.py          # Spatial Difficulty Predictor for RACD
-│   ├── global_refine.py      # Standard global cyclic refinement sampling
-│   ├── racd.py               # Regionally-Adaptive Cyclic Diffusion sampling
-│   └── eval.py               # FID and CMMD metric calculators
-├── report/                   # LaTeX source for the final comprehensive report
-│   └── saidl_report.tex
-├── results/                  # Generated plots and evaluation samples
-│   └── plots/
-├── Colab_Runner.ipynb        # Remote execution notebook for GPU training
-└── README.md                 # You are here
-```
-
----
-
-## 🧠 Part 1: Core ML - Sequence Modeling & Context Extrapolation
+## Core ML - Sequence Modeling & Context Extrapolation
 
 The `core_ml/` directory implements a highly modular language modeling pipeline on the WikiText-2 dataset. The architecture allows dynamic swapping of attention mechanisms and positional encodings to empirically test context extrapolation capabilities.
 
@@ -85,7 +39,7 @@ python core_ml/train.py --attn_type standard --pos_enc rope --context_length 512
 
 ---
 
-## 🎨 Part 2: Domain Task - Regionally-Adaptive Cyclic Diffusion (RACD)
+##  Domain Task - Regionally-Adaptive Cyclic Diffusion (RACD)
 
 The `diffusion/` directory explores adaptive inference in Diffusion Transformers (DiT). Standard cyclic refinement acts as a "polishing" pass by re-injecting noise into a generated image and denoising it again, but doing this globally wastes compute on easy-to-generate regions like flat skies.
 
@@ -125,7 +79,7 @@ Below is a visual demonstration of how Regionally-Adaptive Cyclic Diffusion (RAC
 
 ---
 
-## 💻 Implementation Highlights
+##  Implementation Highlights
 
 This repository contains mathematically rigorous, low-level implementations. For instance, the **Sliding Window Attention** relies on exact causal masking:
 ```python
