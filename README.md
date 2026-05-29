@@ -1,13 +1,8 @@
 # SAiDL Summer Assignment 2026:
 
-> **📄 Official Submission Report**: [Read the full PDF Report here](report/SAIDL_FINALREPORT_VARUN_2025AJPS1184G.pdf)
+[full PDF Report here](report/)
 
-**Author:** B VARUN KUMAR (ID: 2025AJPS1184G)
-
-This repository contains the complete codebase and experimentation framework for the SAiDL Summer 2026 assignment. It is divided into two distinct tasks: the **Core ML (Long-Context Transformers)** and the **Domain-Specific (Regionally-Adaptive Cyclic Diffusion)** tasks.
-
-The project is structured with a heavy emphasis on clean, modular, and mathematically rigorous implementations in PyTorch, avoiding high-level abstractions where low-level understanding is required by the assignment specs.
-
+B VARUN KUMAR (ID: 2025AJPS1184G)
 
 ## Core ML - Sequence Modeling & Context Extrapolation
 
