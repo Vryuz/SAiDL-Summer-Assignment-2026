@@ -70,30 +70,9 @@ Below is a visual demonstration of how Regionally-Adaptive Cyclic Diffusion (RAC
 
 ---
 
-##  Implementation Highlights
-
-This repository contains mathematically rigorous, low-level implementations. For instance, the **Sliding Window Attention** relies on exact causal masking:
-```python
-# Extract from core_ml/attention.py
-causal = torch.tril(torch.ones(T, T, dtype=torch.bool, device=x.device))
-window = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), diagonal=-(self.window_size - 1))
-sw_mask = causal & window
-```
-
-Similarly, the **RACD Difficulty Predictor** intelligently masks regions to save compute during inference:
-```python
-# Extract from diffusion/racd.py
-# h: intermediate DiT features at t=500
-difficulty_mask = torch.sigmoid(predictor(h))
-
-# Re-inject noise only where difficulty > tau
-mask_bool = difficulty_mask > tau
-x_t = torch.where(mask_bool, x_noisy, x_clean)
-```
-
 ---
 
-## 💻 Hardware Environment
+## Hardware Environment
 All models were trained local-first on consumer hardware:
 - **GPU**: NVIDIA RTX 4050 Laptop GPU (6GB VRAM)
 - **Framework**: PyTorch 2.0+ with FP16 Automatic Mixed Precision (AMP)
