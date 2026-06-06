@@ -1,8 +1,8 @@
-# SAiDL Summer Assignment 2026:
+# SAiDL Summer Assignment 2026: Modular Sequence Modeling & Diffusion
 
-[full PDF Report here](report/)
+> **📄 Official Submission Report**: [Read the full PDF Report here](report/SAIDL_FINALREPORT_VARUN_2025AJPS1184G.pdf)
 
-B VARUN KUMAR (ID: 2025AJPS1184G)
+**Author:** B VARUN KUMAR (ID: 2025AJPS1184G)
 
 ## Core ML - Sequence Modeling & Context Extrapolation
 
@@ -27,8 +27,25 @@ The `core_ml/` directory implements a highly modular language modeling pipeline 
 
 ### Running Core ML Locally
 
+To replicate the sequence modeling experiments on your local machine:
 
----
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Vryuz/SAiDL-Summer-Assignment-2026.git
+   cd SAiDL-Summer-Assignment-2026
+   ```
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **Run the training pipeline:**
+   ```bash
+   python core_ml/train.py
+   ```
+4. **Run context extrapolation tests:**
+   ```bash
+   python core_ml/evaluate_extrapolation.py
+   ```---
 
 ##  Domain Task - Regionally-Adaptive Cyclic Diffusion (RACD)
 
