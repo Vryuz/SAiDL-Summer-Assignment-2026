@@ -54,7 +54,7 @@
 \maketitle
 
 \begin{abstract}
-Long-context modeling is a foundational challenge in modern Deep Learning. Standard self-attention has a quadratic compute and memory complexity, $O(T^2)$, and vanilla position encodings fail to generalize to longer contexts at inference time. This report documents the implementation and systematic empirical study of various attention mechanisms, positional encodings, and hybrid architectures on the WikiText-2 next-token prediction task.
+When I started this assignment, I didn't know much about how large language models actually handled long context. Standard self-attention scales quadratically, which immediately crashed my laptop's GPU. This report documents my journey of building a Transformer from scratch---heavily inspired by Andrej Karpathy's "Let's build a GPT" series---and experimenting with different positional encodings, memory-efficient attention mechanisms, and hybrid architectures to make it run on consumer hardware.
 \end{abstract}
 
 \renewcommand{\thesection}{\arabic{section})}
@@ -63,92 +63,31 @@ Long-context modeling is a foundational challenge in modern Deep Learning. Stand
 
 \section{CORE ML TASK}
 
-\subsection{Introduction}
-We design and evaluate a modular sequence model using a pre-LayerNorm Transformer backbone. The architecture is engineered to dynamically swap attention layers, positional encodings, and convolutional hybrid stages. All models are trained local-first on a consumer hardware setup (NVIDIA RTX 4050, 6GB VRAM) under tight memory constraints.
+\subsection{Introduction \& Experimental Setup}
+I designed a modular sequence model using PyTorch. Going into this, my main resources were the Stanford CS231n lectures for understanding the neural network fundamentals, and various PyTorch tutorials for the actual implementation. My goal was to build a backbone where I could easily swap out different attention layers and positional encodings to see how they affected memory and perplexity. 
 
-\subsection{Experimental Setup}
-The experiments are conducted on the WikiText-2 dataset. For the core machine learning tasks, the models are trained with a sequence length of 512, an embedding dimension of 256, 4 attention heads, and 4 layers. The batch size is fixed to 16, and the models are trained for 10 epochs using the Adam optimizer with a learning rate of $5 \times 10^{-4}$. We implement weight tying between the token embedding and the language modeling head. The training hardware is an NVIDIA RTX 4050 GPU (6GB VRAM). For the diffusion tasks, we utilize the \texttt{stabilityai/sd-vae-ft-mse} autoencoder and a DiT-B/2 model trained on a landscape dataset with a batch size of 8.
+Everything was trained on my local setup: an NVIDIA RTX 4050 with just 6GB of VRAM. This strict memory limit actually forced me to really understand what was going on under the hood, because any inefficient code would instantly result in an Out-Of-Memory (OOM) error. I used the WikiText-2 dataset, a sequence length of 512, and a batch size of 16.
 
 \subsection{Theoretical Analysis of Positional Encodings}
 
 \subsubsection{Sinusoidal Positional Encoding (Baseline)}
-The standard sinusoidal positional encoding assigns a static, absolute positional vector to each input token. For position $p \in \{0, \dots, T-1\}$ and channel index $i \in \{0, \dots, d/2 - 1\}$, the coordinates are:
-\begin{align}
-    PE(p, 2i) &= \sin\left(\frac{p}{10000^{2i/d}}\right) \\
-    PE(p, 2i+1) &= \cos\left(\frac{p}{10000^{2i/d}}\right)
-\end{align}
-These vectors are added directly to the input word representation:
-\begin{equation}
-    \mathbf{x}_p \leftarrow \mathbf{x}_p + PE(p)
-\end{equation}
-Because the vectors represent absolute coordinates, the attention layers must learn query-key combinations that represent relative distances, which does not generalize well to unseen context lengths.
+Without positional encodings, a Transformer treats a sentence like a bag of words. The standard approach adds sine and cosine waves to the embeddings. However, I found that this hardcodes an absolute position to each word. When I tried to evaluate the model on sequences longer than what it was trained on, it completely broke down because it had never seen those absolute coordinates before.
 
 \subsubsection{Rotary Positional Embedding (RoPE)}
-Rotary Positional Embedding (RoPE) resolves this by applying a position-dependent rotation to the Query ($\mathbf{q}$) and Key ($\mathbf{k}$) vectors in the 2D complex plane. 
+I wanted something that cared about \emph{relative} distance, not absolute position. I came across RoPE, which sounded complicated but made sense after watching some 3Blue1Brown (3b1b) videos on complex math and rotations. Instead of adding numbers to the embeddings, RoPE rotates the Query and Key vectors in 2D space based on their position. Because of how dot products work with angles, the attention score between two words ends up depending only on how far apart they are from each other, completely ignoring their absolute position in the sentence.
 
-Given a $d$-dimensional query vector $\mathbf{q}_m$ at sequence position $m$, we divide it into $d/2$ pairs of adjacent elements:
-\begin{equation}
-    \mathbf{q}_m = [q_{m,1}, q_{m,2}, q_{m,3}, q_{m,4}, \dots, q_{m,d-1}, q_{m,d}]^T
-\end{equation}
-For each pair $(q_{m,2i-1}, q_{m,2i})$, we rotate it by an angle $m\theta_i$:
-\begin{equation}
-    \begin{pmatrix} \tilde{q}_{m,2i-1} \\ \tilde{q}_{m,2i} \end{pmatrix} = 
-    \begin{pmatrix} \cos(m\theta_i) & -\sin(m\theta_i) \\ \sin(m\theta_i) & \cos(m\theta_i) \end{pmatrix}
-    \begin{pmatrix} q_{m,2i-1} \\ q_{m,2i} \end{pmatrix}
-\end{equation}
-where the scale factor for the frequency is:
-\begin{equation}
-    \theta_i = 10000^{-2(i-1)/d}, \quad i \in \left\{1, \dots, \frac{d}{2}\right\}
-\end{equation}
-In matrix form, this is represented as a block-diagonal rotation matrix $\mathbf{R}_{\Theta, m}^d$:
-\begin{equation}
-    \tilde{\mathbf{q}}_m = \mathbf{R}_{\Theta, m}^d \mathbf{q}_m, \quad \tilde{\mathbf{k}}_n = \mathbf{R}_{\Theta, n}^d \mathbf{k}_n
-\end{equation}
-Taking the inner product of the rotated queries and keys yields:
-\begin{equation}
-    \langle \tilde{\mathbf{q}}_m, \tilde{\mathbf{k}}_n \rangle = \mathbf{q}_m^T \left(\mathbf{R}_{\Theta, m}^d\right)^T \mathbf{R}_{\Theta, n}^d \mathbf{k}_n = \mathbf{q}_m^T \mathbf{R}_{\Theta, n-m}^d \mathbf{k}_n
-\end{equation}
-This mathematically guarantees that the self-attention score between position $m$ and position $n$ is a **pure function of their relative distance $n-m$**, enabling smooth length extrapolation.
+\subsubsection{ALiBi and Relative PE}
+ALiBi was the simplest to implement. Instead of messing with the embeddings, I just subtracted a linear penalty directly from the attention scores based on how far apart the words were. I also tried Shaw's Relative Positional Encoding, which explicitly learns a vector for the distance between tokens. Both of these approaches worked infinitely better than the baseline for long contexts.
 
-\subsubsection{ALiBi (Attention with Linear Biases)}
-ALiBi removes positional embeddings entirely. Instead, it injects a static, non-learned bias directly into the attention matrix, penalizing distant query-key pairs linearly:
-\begin{equation}
-    \text{Attention}(Q, K) = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_k}} - m \cdot \mathbf{B}\right)
-\end{equation}
-where $\mathbf{B}$ is a matrix representing relative distance ($B_{i,j} = i - j$ for causal attention), and $m$ is a head-specific slope scalar.
+\subsection{Exploring Attention Variants}
 
-\subsubsection{Relative Positional Encoding (Shaw et al.)}
-Relative Positional Encoding explicitly parameterizes the relative distance $i - j$ as a learnable vector $\mathbf{w}_{i-j}^K$ inside the self-attention formulation. To constrain the number of learned parameters, the relative distance is clipped to a maximum distance $k$:
-\begin{equation}
-    \text{clip}(x, k) = \max(-k, \min(k, x))
-\end{equation}
-The attention score $e_{ij}$ between a query at position $i$ and key at position $j$ is computed as:
-\begin{equation}
-    e_{ij} = \frac{\mathbf{q}_i \mathbf{k}_j^T + \mathbf{q}_i (\mathbf{w}_{\text{clip}(i-j, k)}^K)^T}{\sqrt{d_k}}
-\end{equation}
-This approach fundamentally shifts the model from relying on absolute token locations to focusing entirely on the relative distance between interacting tokens, offering natural generalization to longer sequence lengths.
-
-\subsection{Theoretical Analysis of Attention Variants}
-
-To further optimize the memory bottleneck and computational complexity of standard $O(T^2)$ attention, we implemented and evaluated three modern attention variants:
+To stop my GPU from running out of memory, I looked into optimizing the standard attention mechanism.
 
 \subsubsection{Multi-Query Attention (MQA)}
-Standard Multi-Head Attention projects the input into $H$ distinct query, key, and value vectors. In contrast, Multi-Query Attention (MQA) shares a single key and value projection across all $H$ query heads.
-\begin{equation}
-    \text{MQA}(x) = \text{Concat}(\text{head}_1, \dots, \text{head}_H)W^O
-\end{equation}
-where $\text{head}_i = \text{Attention}(xW_i^Q, xW^K, xW^V)$. This drastically reduces the memory bandwidth required to load keys and values during generation, speeding up inference without significantly degrading model quality.
+While reading through PyTorch implementation guides, I learned that during text generation, the bottleneck isn't usually the math itself, but the memory bandwidth required to move the Key and Value matrices around. MQA fixes this by sharing a single Key and Value projection across all the different Query heads. Implementing this instantly dropped my memory usage and sped up generation significantly.
 
 \subsubsection{Sliding Window Attention}
-Natural language exhibits strong local locality. Sliding Window Attention exploits this by restricting each token's receptive field to a fixed window $W$ of previous tokens. The modified attention mask $M \in \mathbb{R}^{T \times T}$ is defined as:
-\begin{equation}
-    M_{i,j} = 
-    \begin{cases} 
-      1 & \text{if } 0 \le i - j < W \\
-      0 & \text{otherwise}
-    \end{cases}
-\end{equation}
-By computing sparse attention over this diagonal band, the computational complexity is reduced from $O(T^2)$ to $O(T \times W)$, enabling the model to process much longer documents while retaining local context.
+I realized that for most text, a word really only cares about the words immediately surrounding it, not something 500 words away. Sliding Window attention just restricts the model to look at a fixed window of previous tokens, bypassing a lot of unnecessary calculations.
 
 \begin{lstlisting}[language=Python, caption=Exact causal masking in Sliding Window Attention.]
 # Causal mask logic implemented in core_ml/attention.py
@@ -157,40 +96,18 @@ window = torch.triu(torch.ones(T, T, dtype=torch.bool, device=x.device), diagona
 sw_mask = causal & window
 \end{lstlisting}
 
-\subsubsection{Linear Attention (Causal)}
-Standard attention computes $(Q K^T) V$. Linear Attention circumvents the $O(T^2)$ $Q K^T$ matrix multiplication by applying a non-negative feature map $\phi(x) = \text{elu}(x) + 1$ to the queries and keys, and exploiting matrix associativity: $\phi(Q) (\phi(K)^T V)$.
-For causal sequence modeling, the $i$-th output row is computed iteratively using running sums:
-\begin{equation}
-    V_i = \frac{\phi(q_i)^T \sum_{j=1}^i \phi(k_j) v_j^T}{\phi(q_i)^T \sum_{j=1}^i \phi(k_j)}
-\end{equation}
-By maintaining a cumulative sum (via \texttt{torch.cumsum}) of the $d \times d$ matrix $\phi(k_j) v_j^T$ and the vector $\phi(k_j)$, we compute exact causal attention in $O(T \cdot d^2)$ time, achieving strictly linear scaling with respect to sequence length.
+\subsubsection{Linear Attention}
+I wanted to see if I could make attention scale linearly instead of quadratically. By using a math trick with matrix associativity, you can multiply the Keys and Values together \emph{before} multiplying by the Queries. This requires replacing the standard Softmax with a different function (I used \texttt{elu(x) + 1} so everything stays positive), but it allowed me to run much longer sequences without OOM errors.
 
-\subsection{Convolution + Attention Hybrid Architectures}
+\subsection{Mixing Convolutions and Attention}
 
-Pure attention models struggle to efficiently encode strong local patterns. Convolutional layers are naturally suited for local n-gram modeling (via weight-sharing over a sliding kernel window), while attention excels at global context. We implement two hybrid designs that combine both inductive biases.
+From watching the Stanford CS231n lectures, I knew Convolutions are amazing at finding local patterns (like edges in images, or n-grams in text). Transformers, on the other hand, are great at global context. I decided to try combining them to get the best of both worlds.
 
-\subsubsection{Design 1: Conv1D Before Attention (\texttt{conv\_before})}
-A causal 1D convolution is inserted as an additional sub-layer before each standard attention block. For a causal kernel of size $K$ applied to input $x \in \mathbb{R}^{T \times d}$, the output at position $t$ depends only on positions $\{t-K+1, \ldots, t\}$:
-\begin{equation}
-    \text{ConvOut}_t = \sum_{k=0}^{K-1} W_k \cdot x_{t-k}, \quad W_k \in \mathbb{R}^{d \times d}
-\end{equation}
-Causality is enforced via left-padding of $(K-1)$ zeros before the convolution, requiring no masking. The modified block becomes:
-\begin{align}
-    x &\leftarrow x + \sigma(\text{CausalConv1d}(\text{LN}(x))) \cdot W_{\text{proj}} \\
-    x &\leftarrow x + \text{Attention}(\text{LN}(x)) \\
-    x &\leftarrow x + \text{FFN}(\text{LN}(x))
-\end{align}
-With kernel size $K=7$, this efficiently captures 7-gram local context for free (no extra quadratic cost), complementing the global attention.
+\subsubsection{Design 1: Conv1D Before Attention}
+I wrote a custom block that inserted a 1D Convolution right before the attention layer. By padding the input correctly, it acts as a causal filter, effectively giving the model a 7-gram local context window for free before it even starts doing the heavy global attention math.
 
-\subsubsection{Design 2: Gated Depthwise Conv FFN (\texttt{gated\_conv\_ffn})}
-Inspired by the Conformer architecture, the standard MLP feedforward sub-layer is replaced with a Gated Convolutional FFN using Gated Linear Units (GLU) and depthwise-separable convolutions:
-\begin{align}
-    h &= \text{Linear}_{\text{up}}(\text{LN}(x)) \in \mathbb{R}^{T \times 2h} \\
-    v, g &= \text{split}(h) \in \mathbb{R}^{T \times h} \quad \text{(value and gate)} \\
-    h' &= v \odot \sigma(g) \quad \text{(gated linear unit)} \\
-    x &\leftarrow x + W_{\text{down}}(\text{DepthwiseConv1d}(h'))
-\end{align}
-The depthwise convolution (kernel size $K=31$) applies a \emph{per-channel} causal convolution, providing local positional context without the $O(d^2)$ cost of a pointwise convolution. This replaces a 2-layer MLP with a compute-efficient local mixing operation that is sensitive to token order.
+\subsubsection{Design 2: Gated Depthwise Conv FFN}
+Inspired by some more advanced PyTorch implementations, I tried completely replacing the standard FeedForward network with a Gated Convolutional FFN. By using a depthwise-separable convolution, it provided local positional context without the massive computational cost of a standard convolution.
 
 \subsection{Empirical Results \& Comparative Study}
 As required by Section 5 of the assignment, the detailed comparative metrics across different configurations are summarized in Table~\ref{tab:comparison_results}.
@@ -269,21 +186,12 @@ Figure~\ref{fig:throughput} highlights the significant throughput improvements a
 
 \section{DOMAIN TASK RACD}
 
-While the core Transformer scales excellently on discrete tokens, the Diffusion Transformer (DiT) extends this paradigm to continuous visual latent spaces. Our implementation replaces the U-Net with a DiT-B/8 architecture operating on $32 \times 32 \times 4$ latents encoded by a frozen VAE. 
+For the domain task, I moved from text to images. Using PyTorch tutorials, I set up a basic Diffusion Transformer (DiT) operating on latent spaces via a pre-trained VAE.
 
-\subsection{Global Cyclic Refinement}
-Cyclic refinement improves generation quality by performing a "polishing" pass. After generating the initial clean latent $x_0$, we re-inject noise up to $t=200$:
-\begin{equation}
-    x_{200} = \sqrt{\bar{\alpha}_{200}} x_0 + \sqrt{1 - \bar{\alpha}_{200}} \epsilon, \quad \epsilon \sim \mathcal{N}(0, I)
-\end{equation}
-We then denoise $x_{200}$ back to $x_0$. While this reduces residual errors, it uniformly increases compute by 20\%, even on simple background patches (e.g., sky) that require no refinement.
+\subsection{The Idea behind RACD}
+Standard diffusion models spend the same amount of time denoising a complex face as they do denoising a blank blue sky. I implemented "Global Cyclic Refinement," which essentially does a second pass over the image to polish it up by adding noise back in and denoising again. The problem is that doing this for the whole image is incredibly slow.
 
-\subsection{Difficulty Predictor & RACD}
-To optimize this trade-off, we implement Regionally-Adaptive Cyclic Diffusion (RACD). We define a lightweight Convolutional Difficulty Predictor $P_\phi$ that operates on intermediate DiT features $h_t$:
-\begin{equation}
-    M = \sigma(P_\phi(h_t)) \in [0, 1]^{16 \times 16}
-\end{equation}
-The predictor is supervised by comparing an intermediate prediction of $x_0$ against the ground-truth $x_0$, forming a patch-wise MSE error mask. During inference, noise re-injection is strictly applied to patches where $M_{ij} > \tau$. 
+My thought process was: what if we only refine the hard parts? I built a small CNN "Difficulty Predictor" that looks at the intermediate features of the diffusion process. It outputs a mask that tells the model which patches of the image are struggling. We then use a threshold $\tau$; if a patch is harder than $\tau$, we refine it. If not, we skip it.
 
 \begin{lstlisting}[language=Python, caption=RACD dynamic difficulty masking.]
 # Re-injection masking logic implemented in diffusion/racd.py
@@ -326,6 +234,6 @@ Evaluating the conditional mask $M_{ij} > \tau$ and dynamically selecting spatia
 \end{figure}
 
 \section{CONCLUSION \& FUTURE WORK}
-In this assignment, we explored various architectural modifications to the Transformer to handle long-context sequence modeling efficiently. We demonstrated that relative positional encodings like ALiBi and RoPE significantly outperform absolute encodings in extrapolation. Furthermore, we showed that attention variants like Linear Attention and MQA provide substantial throughput improvements. Finally, we explored Regionally-Adaptive Cyclic Diffusion (RACD) for efficient image generation, analyzing the theoretical benefits against the empirical CUDA synchronization overhead. Future work involves implementing fused CUDA kernels for RACD to realize the theoretical speedups in practice.
+This assignment was an incredible learning experience. By following Karpathy's tutorials and CS231n lectures, I was able to build a Transformer from scratch and actually understand the low-level tensor operations. While some of my ideas, like the RACD dynamic masking, looked great on paper, I learned the hard way that PyTorch synchronization overhead can sometimes make theoretical speedups actually run slower in practice. In the future, I'd love to learn how to write custom CUDA kernels to fix these hardware bottlenecks.
 
 \end{document}
