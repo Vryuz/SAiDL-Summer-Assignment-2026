@@ -37,7 +37,3 @@ All models were trained local-first on consumer hardware:
 - **GPU**: NVIDIA RTX 4050 Laptop GPU (6GB VRAM)
 - **Framework**: PyTorch 2.0+ with FP16 Automatic Mixed Precision (AMP)
 
----
-
-## 📄 Final Report
-A comprehensive LaTeX report detailing the mathematical formulation of all implemented variants, complexity analysis, and empirical results (extrapolation perplexity curves, attention throughputs, and CMMD/Compute-Time trade-offs) is available in `report/saidl_report.tex`. You can compile it using `pdflatex`.
