@@ -1,6 +1,6 @@
 # SAiDL Summer Assignment 2026: Modular Sequence Modeling & Diffusion
 
-> **📄 Official Submission Report**: [Read the full PDF Report here](report/SAIDL_FINALREPORT_VARUN_2025AJPS1184G.pdf)
+> FINAL REPORT report/
 
 **Author:** B VARUN KUMAR (ID: 2025AJPS1184G)
 
